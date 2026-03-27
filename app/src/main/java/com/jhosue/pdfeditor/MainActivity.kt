@@ -49,17 +49,27 @@ fun AppNavigation() {
         startDestination = "home"
     ) {
         composable("home") {
-            HomeScreen(onNavigateToViewer = { fileName ->
-                navController.navigate("viewer/$fileName")
+            HomeScreen(onNavigateToViewer = { pathEncoded, fileNameEncoded ->
+                navController.navigate("viewer/$pathEncoded/$fileNameEncoded")
             })
         }
         composable(
-            route = "viewer/{fileName}",
-            arguments = listOf(navArgument("fileName") { type = NavType.StringType })
+            route = "viewer/{pathEncoded}/{fileNameEncoded}",
+            arguments = listOf(
+                navArgument("pathEncoded") { type = NavType.StringType },
+                navArgument("fileNameEncoded") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
-            val fileName = backStackEntry.arguments?.getString("fileName") ?: ""
+            val pathEncoded = backStackEntry.arguments?.getString("pathEncoded") ?: ""
+            val fileNameEncoded = backStackEntry.arguments?.getString("fileNameEncoded") ?: ""
+            val fileName = try {
+                java.net.URLDecoder.decode(fileNameEncoded, "UTF-8")
+            } catch (e: Exception) {
+                "documento.pdf"
+            }
             ViewerScreen(
                 fileName = fileName,
+                uriString = pathEncoded,
                 onBackClick = { navController.popBackStack() }
             )
         }

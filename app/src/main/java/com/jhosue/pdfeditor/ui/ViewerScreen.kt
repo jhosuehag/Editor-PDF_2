@@ -1,5 +1,7 @@
 package com.jhosue.pdfeditor.ui
 
+import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,7 +31,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -40,8 +45,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Model for editable PDF fields
 data class EditablePdfField(
@@ -60,12 +67,15 @@ enum class ExportOption { DEVICE, SHARE }
 @Composable
 fun ViewerScreen(
     fileName: String = "Constancia_Matricula_2026.pdf",
+    uriString: String = "",
     onBackClick: () -> Unit = {}
 ) {
     // State for navigation and save simulation
     var currentPage by remember { mutableIntStateOf(1) }
-    val totalPages by remember { mutableIntStateOf(1) }
+    var totalPages by remember { mutableIntStateOf(1) }
     var isSaving by remember { mutableStateOf(false) }
+    var pdfBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
     
     // Export Modal State
     var showExportModal by remember { mutableStateOf(false) }
@@ -88,6 +98,50 @@ fun ViewerScreen(
 
     val scrollState = rememberScrollState()
     val focusManager = LocalFocusManager.current
+    val appContext = LocalContext.current
+
+    LaunchedEffect(uriString) {
+        withContext(Dispatchers.IO) {
+            try {
+                val filePath = java.net.URLDecoder.decode(uriString, "UTF-8")
+                val file = java.io.File(filePath)
+
+                if (!file.exists()) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(appContext, "Error: archivo temporal no encontrado", Toast.LENGTH_LONG).show()
+                    }
+                    return@withContext
+                }
+
+                val parcelFileDescriptor = android.os.ParcelFileDescriptor.open(
+                    file,
+                    android.os.ParcelFileDescriptor.MODE_READ_ONLY
+                )
+
+                val pdfRenderer = android.graphics.pdf.PdfRenderer(parcelFileDescriptor)
+                totalPages = pdfRenderer.pageCount
+
+                val page = pdfRenderer.openPage(0)
+                val width = (page.width * 2).coerceAtMost(2048)
+                val height = (page.height * 2).coerceAtMost(4096)
+                val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(android.graphics.Color.WHITE)
+                page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                page.close()
+                pdfRenderer.close()
+                parcelFileDescriptor.close()
+
+                withContext(Dispatchers.Main) {
+                    pdfBitmap = bitmap
+                    isLoading = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, "Error: ${e.javaClass.simpleName}: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     Scaffold(
         modifier = Modifier
@@ -122,7 +176,7 @@ fun ViewerScreen(
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                 ) {
-                    PdfSheet(fieldData)
+                    PdfSheet(fields = fieldData, isLoading = isLoading, bitmap = pdfBitmap)
                 }
             }
             
@@ -370,7 +424,7 @@ fun ToolbarButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick
 }
 
 @Composable
-fun PdfSheet(fields: List<EditablePdfField>) {
+fun PdfSheet(fields: List<EditablePdfField>, isLoading: Boolean, bitmap: android.graphics.Bitmap?) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -380,18 +434,25 @@ fun PdfSheet(fields: List<EditablePdfField>) {
             .defaultMinSize(minHeight = 700.dp),
         contentAlignment = Alignment.TopCenter
     ) {
-        // Placeholder for PDF content - simulated blank sheet
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(700.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "Vista previa del PDF",
-                color = Color(0xFFE0E0E0),
-                fontSize = 14.sp
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(48.dp),
+                    color = Color(0xFF6366F1)
+                )
+            } else if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Página del PDF",
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.FillWidth
+                )
+            }
         }
         
         // OVERLAYS - EDITABLE FIELDS

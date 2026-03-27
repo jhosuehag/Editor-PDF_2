@@ -1,6 +1,7 @@
 package com.jhosue.pdfeditor.ui
 
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -37,8 +39,43 @@ import androidx.compose.ui.unit.sp
 import com.jhosue.pdfeditor.ui.theme.*
 
 @Composable
-fun HomeScreen(onNavigateToViewer: (String) -> Unit = {}) {
+fun HomeScreen(onNavigateToViewer: (String, String) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
+
+    val pdfLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                var fileName = "documento.pdf"
+                context.contentResolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        fileName = cursor.getString(0)
+                    }
+                }
+
+                val tempFile = java.io.File(
+                    context.cacheDir,
+                    "pdf_temp_${System.currentTimeMillis()}.pdf"
+                )
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    tempFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                val pathEncoded = java.net.URLEncoder.encode(tempFile.absolutePath, "UTF-8")
+                val fileNameEncoded = java.net.URLEncoder.encode(fileName, "UTF-8")
+                onNavigateToViewer(pathEncoded, fileNameEncoded)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     Scaffold(
         modifier = Modifier
@@ -57,10 +94,14 @@ fun HomeScreen(onNavigateToViewer: (String) -> Unit = {}) {
             GreetingSection()
             Spacer(modifier = Modifier.height(24.dp))
             UploadZone(onUploadClick = {
-                Toast.makeText(context, "Función en desarrollo", Toast.LENGTH_SHORT).show()
+                try {
+                    pdfLauncher.launch(arrayOf("application/pdf"))
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             })
             Spacer(modifier = Modifier.height(32.dp))
-            RecentsSection(onFileClick = onNavigateToViewer)
+            RecentsSection(onFileClick = { name -> onNavigateToViewer("", name) })
             
             // Empty State (Hidden)
             // EmptyState()
